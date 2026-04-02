@@ -29,8 +29,9 @@ public class PerfectHashTableSimpleThroughputBenchmark {
 
     private static final int BATCH_OPERATIONS = 256;
     private static final int MAX_ITEM_COUNT = 10_000;
+    private static final long KEY_SEED = 13_337L;
 
-    private static final long[] KEY_POOL = keyPool(MAX_ITEM_COUNT);
+    private static final long[] KEY_POOL = randomUniqueKeyPool(MAX_ITEM_COUNT, KEY_SEED);
 
     @State(Scope.Benchmark)
     public static class ReadState {
@@ -87,10 +88,11 @@ public class PerfectHashTableSimpleThroughputBenchmark {
         return keys;
     }
 
-    private static long[] keyPool(int size) {
+    private static long[] randomUniqueKeyPool(int size, long seed) {
         long[] keys = new long[size];
+        java.util.Random random = new java.util.Random(seed);
         for (int index = 0; index < size; index++) {
-            keys[index] = index;
+            keys[index] = random.nextLong();
         }
         return keys;
     }
