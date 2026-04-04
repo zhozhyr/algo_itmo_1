@@ -151,19 +151,6 @@ public final class LshHashTable {
         return pairs;
     }
 
-    public List<int[]> findVectorDoublesByFullScan() {
-        List<int[]> pairs = new ArrayList<>();
-        for (int left = 0; left < vectors.size(); left++) {
-            double[] leftVector = vectors.get(left);
-            for (int right = left + 1; right < vectors.size(); right++) {
-                if (Arrays.equals(leftVector, vectors.get(right))) {
-                    pairs.add(new int[]{left, right});
-                }
-            }
-        }
-        return pairs;
-    }
-
     public double[] getVector(int id) {
         if (id < 0 || id >= vectors.size()) {
             throw new IndexOutOfBoundsException("Invalid vector id: " + id);
