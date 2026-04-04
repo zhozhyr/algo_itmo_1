@@ -226,9 +226,6 @@ public class ExtendibleHashTable implements AutoCloseable {
             writeRecord(targetBucketId, target.size, (byte) 1, r.key, r.value);
             setBucketSize(targetBucketId, target.size + 1);
         }
-
-        // A split may legitimately leave one side empty when all records share
-        // the current prefix; the next split will use a deeper bit.
     }
 
     private void doubleDirectory(int oldGlobalDepth) throws IOException {
@@ -417,13 +414,8 @@ public class ExtendibleHashTable implements AutoCloseable {
         try {
             raf.setLength(size);
             FileChannel channel = raf.getChannel();
-            try {
-                MappedByteBuffer buffer = channel.map(FileChannel.MapMode.READ_WRITE, 0, size);
-                return new FileHandle(raf, channel, buffer);
-            } catch (IOException e) {
-                channel.close();
-                throw e;
-            }
+            MappedByteBuffer buffer = channel.map(FileChannel.MapMode.READ_WRITE, 0, size);
+            return new FileHandle(raf, channel, buffer);
         } catch (IOException e) {
             raf.close();
             throw e;
@@ -432,34 +424,35 @@ public class ExtendibleHashTable implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
-        IOException failure = null;
-
-        for (FileHandle handle : bucketHandles.values()) {
-            try {
-                handle.close();
-            } catch (IOException e) {
-                if (failure == null) {
-                    failure = e;
-                } else {
-                    failure.addSuppressed(e);
-                }
-            }
-        }
+        IOException failure = closeAll(bucketHandles.values());
         bucketHandles.clear();
-
-        try {
-            directoryHandle.close();
-        } catch (IOException e) {
-            if (failure == null) {
-                failure = e;
-            } else {
-                failure.addSuppressed(e);
-            }
-        }
+        failure = close(directoryHandle, failure);
 
         if (failure != null) {
             throw failure;
         }
+    }
+
+    private static IOException closeAll(Iterable<? extends AutoCloseable> closeables) {
+        IOException failure = null;
+        for (AutoCloseable closeable : closeables) {
+            failure = close(closeable, failure);
+        }
+        return failure;
+    }
+
+    private static IOException close(AutoCloseable closeable, IOException failure) {
+        try {
+            closeable.close();
+        } catch (IOException e) {
+            if (failure == null) {
+                return e;
+            }
+            failure.addSuppressed(e);
+        } catch (Exception e) {
+            throw new IllegalStateException("Unexpected exception while closing resource", e);
+        }
+        return failure;
     }
 
     @FunctionalInterface

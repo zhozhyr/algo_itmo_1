@@ -33,7 +33,9 @@ public class ExtendibleHashTableSimpleLatencyBenchmark {
 
     private static final int BUCKET_CAPACITY = 32;
     private static final int BATCH_OPERATIONS = 256;
-    private static final int MAX_ITEM_COUNT = 10_000;
+    private static final int UPDATE_BATCH_OPERATIONS = 4096;
+    private static final int INSERT_BASE_DIVISOR = 2;
+    private static final int MAX_ITEM_COUNT = 12_000;
     private static final int INSERT_POOL_SIZE = MAX_ITEM_COUNT + BATCH_OPERATIONS * 64;
 
     private static final long[] READ_KEY_POOL = keyPool(MAX_ITEM_COUNT);
@@ -44,7 +46,7 @@ public class ExtendibleHashTableSimpleLatencyBenchmark {
     @State(Scope.Benchmark)
     public static class ReadState {
 
-        @Param({"1000", "2500", "5000", "7500", "10000"})
+        @Param({"2000", "4000", "6000", "8000", "10000", "12000"})
         public int itemCount;
 
         Path directory;
@@ -75,7 +77,7 @@ public class ExtendibleHashTableSimpleLatencyBenchmark {
     @State(Scope.Benchmark)
     public static class UpdateState {
 
-        @Param({"1000", "2500", "5000", "7500", "10000"})
+        @Param({"2000", "4000", "6000", "8000", "10000", "12000"})
         public int itemCount;
 
         Path directory;
@@ -83,19 +85,19 @@ public class ExtendibleHashTableSimpleLatencyBenchmark {
         int[] updateIndexes;
         long[] updatedValues;
 
-        @Setup(Level.Invocation)
+        @Setup(Level.Iteration)
         public void setUp() throws IOException {
             directory = Files.createTempDirectory("jmh-eht-update");
             table = new ExtendibleHashTable(directory, BUCKET_CAPACITY);
-            updateIndexes = randomIndexes(itemCount, BATCH_OPERATIONS, 27_001L);
-            updatedValues = values("updated", BATCH_OPERATIONS);
+            updateIndexes = randomIndexes(itemCount, UPDATE_BATCH_OPERATIONS, 27_001L);
+            updatedValues = values("updated", UPDATE_BATCH_OPERATIONS);
 
             for (int index = 0; index < itemCount; index++) {
                 table.put(UPDATE_KEY_POOL[index], valueOf(index));
             }
         }
 
-        @TearDown(Level.Invocation)
+        @TearDown(Level.Iteration)
         public void tearDown() throws IOException {
             if (table != null) {
                 table.close();
@@ -108,24 +110,24 @@ public class ExtendibleHashTableSimpleLatencyBenchmark {
     @State(Scope.Benchmark)
     public static class InsertState {
 
-        @Param({"1000", "2500", "5000", "7500", "10000"})
+        @Param({"2000", "4000", "6000", "8000", "10000", "12000"})
         public int itemCount;
 
         Path directory;
         ExtendibleHashTable table;
         long[] insertedValues;
         int insertWindowOffset;
-        int invocationIndex;
+        int preloadedItemCount;
 
         @Setup(Level.Invocation)
         public void setUp() throws IOException {
             directory = Files.createTempDirectory("jmh-eht-insert");
             table = new ExtendibleHashTable(directory, BUCKET_CAPACITY);
             insertedValues = values("inserted", BATCH_OPERATIONS);
-            insertWindowOffset = insertWindowOffset(itemCount, invocationIndex);
-            invocationIndex++;
+            preloadedItemCount = preloadedItemCount(itemCount);
+            insertWindowOffset = insertWindowOffset(preloadedItemCount);
 
-            for (int index = 0; index < itemCount; index++) {
+            for (int index = 0; index < preloadedItemCount; index++) {
                 table.put(INSERT_KEY_POOL[insertWindowOffset + index], valueOf(index));
             }
         }
@@ -143,14 +145,14 @@ public class ExtendibleHashTableSimpleLatencyBenchmark {
     @State(Scope.Benchmark)
     public static class DeleteState {
 
-        @Param({"1000", "2500", "5000", "7500", "10000"})
+        @Param({"2000", "4000", "6000", "8000", "10000", "12000"})
         public int itemCount;
 
         Path directory;
         ExtendibleHashTable table;
         int[] deleteIndexes;
 
-        @Setup(Level.Invocation)
+        @Setup(Level.Iteration)
         public void setUp() throws IOException {
             directory = Files.createTempDirectory("jmh-eht-delete");
             table = new ExtendibleHashTable(directory, BUCKET_CAPACITY);
@@ -161,7 +163,7 @@ public class ExtendibleHashTableSimpleLatencyBenchmark {
             }
         }
 
-        @TearDown(Level.Invocation)
+        @TearDown(Level.Iteration)
         public void tearDown() throws IOException {
             if (table != null) {
                 table.close();
@@ -184,7 +186,7 @@ public class ExtendibleHashTableSimpleLatencyBenchmark {
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.MICROSECONDS)
-    @OperationsPerInvocation(BATCH_OPERATIONS)
+    @OperationsPerInvocation(UPDATE_BATCH_OPERATIONS)
     public void updateExistingBatch(UpdateState state) throws IOException {
         for (int position = 0; position < state.updateIndexes.length; position++) {
             state.table.update(
@@ -201,7 +203,7 @@ public class ExtendibleHashTableSimpleLatencyBenchmark {
     public void insertFreshBatch(InsertState state) throws IOException {
         for (int index = 0; index < BATCH_OPERATIONS; index++) {
             state.table.put(
-                    INSERT_KEY_POOL[state.insertWindowOffset + state.itemCount + index],
+                    INSERT_KEY_POOL[state.insertWindowOffset + state.preloadedItemCount + index],
                     state.insertedValues[index]
             );
         }
@@ -237,13 +239,17 @@ public class ExtendibleHashTableSimpleLatencyBenchmark {
         return keys;
     }
 
-    private static int insertWindowOffset(int itemCount, int invocationIndex) {
+    private static int insertWindowOffset(int itemCount) {
         int windowSize = itemCount + BATCH_OPERATIONS;
         int maxOffset = INSERT_KEY_POOL.length - windowSize;
         if (maxOffset <= 0) {
             return 0;
         }
-        return (int) ((invocationIndex * 997L) % (maxOffset + 1L));
+        return (int) ((itemCount * 997L) % (maxOffset + 1L));
+    }
+
+    private static int preloadedItemCount(int itemCount) {
+        return Math.max(1, itemCount / INSERT_BASE_DIVISOR);
     }
 
     private static int[] randomIndexes(int bound, int size, long seed) {

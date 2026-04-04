@@ -8,7 +8,7 @@ import java.util.Random;
 
 public final class PerfectHashTable<K> {
 
-    private static final int PRIME = 2_147_483_647;
+    private static final int MAX_HASH_VALUE = Integer.MAX_VALUE;
     private static final int MAX_PRIMARY_ATTEMPTS = 10_000;
     private static final int MAX_SECONDARY_ATTEMPTS = 10_000;
 
@@ -72,7 +72,7 @@ public final class PerfectHashTable<K> {
             return;
         }
 
-        UniversalHashFunction hash = new UniversalHashFunction(PRIME - 1, 0);
+        UniversalHashFunction hash = UniversalHashFunction.identity();
         @SuppressWarnings("unchecked")
         List<Entry<K>>[] buckets = new List[n];
         for (Entry<K> entry : entries) {
@@ -205,8 +205,8 @@ public final class PerfectHashTable<K> {
 
     private record UniversalHashFunction(int a, int b) {
         private static UniversalHashFunction random(Random random) {
-            int a = random.nextInt(PRIME - 1) + 1;
-            int b = random.nextInt(PRIME);
+            int a = random.nextInt(MAX_HASH_VALUE - 1) + 1;
+            int b = random.nextInt(MAX_HASH_VALUE);
             return new UniversalHashFunction(a, b);
         }
 
@@ -219,9 +219,11 @@ public final class PerfectHashTable<K> {
                 return 0;
             }
 
-            long reduced = value % (long) PRIME;
-            long hashed = ((long) a * reduced + b) % PRIME;
-            return (int) (hashed % mod);
+            return hash(value) % mod;
+        }
+
+        private int hash(int value) {
+            return (int) Math.floorMod((long) a * value + b, MAX_HASH_VALUE);
         }
     }
 }

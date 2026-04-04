@@ -5,7 +5,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
@@ -15,9 +14,8 @@ public final class LshHashTable {
     private final int dimension;
     private final int numHashFunctions;
     private final double[][] planes;
-    private final Map<Long, List<Integer>> table = new HashMap<>();
+    private final Map<Long, List<Integer>> table;
     private final List<double[]> vectors = new ArrayList<>();
-    private final List<String> texts = new ArrayList<>();
 
     public LshHashTable(int dimension, int numHashFunctions) {
         if (dimension <= 0) {
@@ -33,10 +31,46 @@ public final class LshHashTable {
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
         for (int hashIndex = 0; hashIndex < numHashFunctions; hashIndex++) {
+            double[] plane = planes[hashIndex];
             for (int coordinate = 0; coordinate < dimension; coordinate++) {
-                planes[hashIndex][coordinate] = random.nextGaussian();
+                plane[coordinate] = random.nextGaussian();
             }
         }
+
+        this.table = new HashMap<>();
+    }
+
+    public LshHashTable(List<double[]> initialVectors, int numHashFunctions) {
+        this(requireDimension(initialVectors), numHashFunctions);
+        addAll(initialVectors);
+    }
+
+    private static int requireDimension(List<double[]> vectors) {
+        Objects.requireNonNull(vectors, "vectors must not be null");
+        if (vectors.isEmpty()) {
+            throw new IllegalArgumentException("vectors must not be empty");
+        }
+
+        double[] first = vectors.get(0);
+        if (first == null) {
+            throw new IllegalArgumentException("First vector is null");
+        }
+
+        int dimension = first.length;
+        if (dimension == 0) {
+            throw new IllegalArgumentException("Vector dimension must be positive");
+        }
+
+        for (int index = 1; index < vectors.size(); index++) {
+            double[] vector = vectors.get(index);
+            if (vector == null) {
+                throw new IllegalArgumentException("Vector at index " + index + " is null");
+            }
+            if (vector.length != dimension) {
+                throw new IllegalArgumentException("All vectors must have the same dimension");
+            }
+        }
+        return dimension;
     }
 
     public int add(double[] vector) {
@@ -50,17 +84,16 @@ public final class LshHashTable {
         int id = vectors.size();
         double[] stored = vector.clone();
         vectors.add(stored);
-        texts.add(null);
 
         table.computeIfAbsent(hash(stored), ignored -> new ArrayList<>()).add(id);
         return id;
     }
 
-    public int addText(String text) {
-        Objects.requireNonNull(text, "text must not be null");
-        int id = add(toTextVector(text, dimension));
-        texts.set(id, text);
-        return id;
+    public void addAll(List<double[]> newVectors) {
+        Objects.requireNonNull(newVectors, "newVectors must not be null");
+        for (double[] vector : newVectors) {
+            add(vector);
+        }
     }
 
     public List<List<Integer>> read() {
@@ -71,10 +104,51 @@ public final class LshHashTable {
         List<List<Integer>> buckets = new ArrayList<>();
         for (List<Integer> bucket : table.values()) {
             if (!bucket.isEmpty()) {
-                buckets.add(List.copyOf(bucket));
+                buckets.add(new ArrayList<>(bucket));
             }
         }
         return buckets;
+    }
+
+    public List<Integer> lshSearch(double[] queryVector) {
+        Objects.requireNonNull(queryVector, "queryVector must not be null");
+        if (queryVector.length != dimension) {
+            throw new IllegalArgumentException(
+                    "Vector dimension " + queryVector.length + " does not match index dimension " + dimension
+            );
+        }
+
+        List<Integer> bucket = table.get(hash(queryVector));
+        if (bucket == null || bucket.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return new ArrayList<>(bucket);
+    }
+
+    public List<int[]> findDoubles() {
+        List<List<Integer>> buckets = read();
+        if (buckets.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<int[]> pairs = new ArrayList<>();
+        for (List<Integer> bucket : buckets) {
+            int bucketSize = bucket.size();
+            if (bucketSize < 2) {
+                continue;
+            }
+            for (int leftIndex = 0; leftIndex < bucketSize; leftIndex++) {
+                int leftId = bucket.get(leftIndex);
+                double[] leftVector = vectors.get(leftId);
+                for (int rightIndex = leftIndex + 1; rightIndex < bucketSize; rightIndex++) {
+                    int rightId = bucket.get(rightIndex);
+                    if (Arrays.equals(leftVector, vectors.get(rightId))) {
+                        pairs.add(new int[]{Math.min(leftId, rightId), Math.max(leftId, rightId)});
+                    }
+                }
+            }
+        }
+        return pairs;
     }
 
     public List<int[]> findVectorDoublesByFullScan() {
@@ -90,34 +164,11 @@ public final class LshHashTable {
         return pairs;
     }
 
-    public List<int[]> findTextDoublesByFullScan() {
-        List<int[]> pairs = new ArrayList<>();
-        for (int left = 0; left < texts.size(); left++) {
-            String leftText = texts.get(left);
-            if (leftText == null) {
-                continue;
-            }
-            for (int right = left + 1; right < texts.size(); right++) {
-                if (leftText.equals(texts.get(right))) {
-                    pairs.add(new int[]{left, right});
-                }
-            }
-        }
-        return pairs;
-    }
-
     public double[] getVector(int id) {
         if (id < 0 || id >= vectors.size()) {
             throw new IndexOutOfBoundsException("Invalid vector id: " + id);
         }
         return vectors.get(id).clone();
-    }
-
-    public String getText(int id) {
-        if (id < 0 || id >= texts.size() || texts.get(id) == null) {
-            throw new IndexOutOfBoundsException("Invalid text id: " + id);
-        }
-        return texts.get(id);
     }
 
     public int size() {
@@ -132,45 +183,14 @@ public final class LshHashTable {
         long bits = 0L;
         for (int hashIndex = 0; hashIndex < numHashFunctions; hashIndex++) {
             double dot = 0.0;
+            double[] plane = planes[hashIndex];
             for (int coordinate = 0; coordinate < dimension; coordinate++) {
-                dot += vector[coordinate] * planes[hashIndex][coordinate];
+                dot += vector[coordinate] * plane[coordinate];
             }
             if (dot >= 0.0) {
                 bits |= 1L << hashIndex;
             }
         }
         return bits;
-    }
-
-    public static double[] toTextVector(String text, int dimension) {
-        if (dimension <= 0) {
-            throw new IllegalArgumentException("dimension must be positive");
-        }
-
-        double[] vector = new double[dimension];
-        String normalized = normalizeText(text);
-
-        if (normalized.isEmpty()) {
-            return vector;
-        }
-
-        if (normalized.length() <= 3) {
-            vector[Math.floorMod(normalized.hashCode(), dimension)] += 1.0;
-            return vector;
-        }
-
-        for (int start = 0; start <= normalized.length() - 3; start++) {
-            String shingle = normalized.substring(start, start + 3);
-            vector[Math.floorMod(shingle.hashCode(), dimension)] += 1.0;
-        }
-
-        return vector;
-    }
-
-    private static String normalizeText(String text) {
-        return text
-                .toLowerCase(Locale.ROOT)
-                .replaceAll("\\s+", " ")
-                .trim();
     }
 }

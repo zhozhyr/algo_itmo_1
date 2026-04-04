@@ -17,6 +17,8 @@ import org.openjdk.jmh.annotations.Threads;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 @Warmup(iterations = 5, time = 1)
@@ -33,7 +35,7 @@ public class LshHashTableSimpleThroughputBenchmark {
 
     private static final double[][] BUILD_POINT_POOL = pointPool(MAX_ITEM_COUNT, 17L);
     private static final double[][] INSERT_POINT_POOL = pointPool(INSERT_POOL_SIZE, 31L);
-    private static final double[][] DUPLICATE_SCAN_POOL = duplicatePointPool(MAX_ITEM_COUNT, 53L);
+    private static final double[][] SEARCH_POINT_POOL = pointPool(MAX_ITEM_COUNT, 53L);
 
     @State(Scope.Benchmark)
     public static class BuildState {
@@ -41,7 +43,7 @@ public class LshHashTableSimpleThroughputBenchmark {
         @Param({"1000", "2500", "5000", "7500", "10000"})
         public int itemCount;
 
-        double[][] points;
+        List<double[]> points;
 
         @Setup(Level.Invocation)
         public void setUp() {
@@ -72,19 +74,21 @@ public class LshHashTableSimpleThroughputBenchmark {
     }
 
     @State(Scope.Benchmark)
-    public static class FullScanState {
+    public static class SearchState {
 
         @Param({"1000", "2500", "5000", "7500", "10000"})
         public int itemCount;
 
         LshHashTable table;
+        int[] queryIndexes;
 
         @Setup(Level.Iteration)
         public void setUp() {
             table = new LshHashTable(DIMENSION, NUM_HASH_FUNCTIONS);
             for (int index = 0; index < itemCount; index++) {
-                table.add(DUPLICATE_SCAN_POOL[index]);
+                table.add(SEARCH_POINT_POOL[index]);
             }
+            queryIndexes = randomIndexes(itemCount, BATCH_OPERATIONS, 61L);
         }
     }
 
@@ -92,11 +96,7 @@ public class LshHashTableSimpleThroughputBenchmark {
     @BenchmarkMode(Mode.Throughput)
     @OutputTimeUnit(TimeUnit.MICROSECONDS)
     public void buildFullIndex(BuildState state, Blackhole blackhole) {
-        LshHashTable table = new LshHashTable(DIMENSION, NUM_HASH_FUNCTIONS);
-        for (double[] point : state.points) {
-            table.add(point);
-        }
-        blackhole.consume(table);
+        blackhole.consume(new LshHashTable(state.points, NUM_HASH_FUNCTIONS));
     }
 
     @Benchmark
@@ -112,13 +112,18 @@ public class LshHashTableSimpleThroughputBenchmark {
     @Benchmark
     @BenchmarkMode(Mode.Throughput)
     @OutputTimeUnit(TimeUnit.MICROSECONDS)
-    public void findVectorDoublesByFullScan(FullScanState state, Blackhole blackhole) {
-        blackhole.consume(state.table.findVectorDoublesByFullScan());
+    @OperationsPerInvocation(BATCH_OPERATIONS)
+    public void lshSearch(SearchState state, Blackhole blackhole) {
+        for (int index : state.queryIndexes) {
+            blackhole.consume(state.table.lshSearch(SEARCH_POINT_POOL[index]));
+        }
     }
 
-    private static double[][] firstPoints(double[][] source, int count) {
-        double[][] points = new double[count][];
-        System.arraycopy(source, 0, points, 0, count);
+    private static List<double[]> firstPoints(double[][] source, int count) {
+        List<double[]> points = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            points.add(source[index]);
+        }
         return points;
     }
 
@@ -142,12 +147,12 @@ public class LshHashTableSimpleThroughputBenchmark {
         return points;
     }
 
-    private static double[][] duplicatePointPool(int size, long seed) {
-        double[][] uniquePoints = pointPool((size + 1) / 2, seed);
-        double[][] points = new double[size][DIMENSION];
+    private static int[] randomIndexes(int bound, int size, long seed) {
+        java.util.Random random = new java.util.Random(seed);
+        int[] indexes = new int[size];
         for (int index = 0; index < size; index++) {
-            points[index] = uniquePoints[index / 2];
+            indexes[index] = random.nextInt(bound);
         }
-        return points;
+        return indexes;
     }
 }

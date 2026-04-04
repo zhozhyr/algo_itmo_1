@@ -94,11 +94,23 @@ def plot_series(name, mode_name, unit, points, output_dir, title_prefix):
     ]
 
     fig, ax = plt.subplots(figsize=(10, 6))
+    line_color = "#1f77b4"
+
+    ax.fill_between(
+        x_values,
+        lows,
+        highs,
+        color=line_color,
+        alpha=0.25,
+        linewidth=0,
+    )
     ax.errorbar(
         x_values,
         y_values,
         yerr=y_errors,
         fmt="-o",
+        color=line_color,
+        ecolor=line_color,
         linewidth=2,
         markersize=6,
         capsize=4,
